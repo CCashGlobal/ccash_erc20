@@ -1,7 +1,3 @@
-/**
- *Submitted for verification at Etherscan.io on 2019-08-23
-*/
-
 pragma solidity ^0.5.10;
 
 library SafeMath {
@@ -15,9 +11,7 @@ library SafeMath {
     }
 
     function div(uint256 a, uint256 b) internal pure returns (uint256) {
-        // assert(b > 0); // Solidity automatically throws when dividing by 0
         uint256 c = a / b;
-        // assert(a == b * c + a % b); // There is no case in which this doesn't hold
         return c;
     }
 
@@ -35,6 +29,7 @@ library SafeMath {
 
 contract Ownable {
     address public owner;
+    address public newOwner;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
@@ -43,16 +38,21 @@ contract Ownable {
     }
 
     modifier onlyOwner() {
-        require(msg.sender == owner);
+        require(msg.sender == owner, "Caller is not the owner");
         _;
     }
 
-    function transferOwnership(address newOwner) public onlyOwner {
-        require(newOwner != address(0));
-        emit OwnershipTransferred(owner, newOwner);
-        owner = newOwner;
+    function transferOwnership(address _newOwner) public onlyOwner {
+        require(_newOwner != address(0), "New owner is the zero address");
+        newOwner = _newOwner;
     }
 
+    function acceptOwnership() public {
+        require(msg.sender == newOwner, "Caller is not the new owner");
+        emit OwnershipTransferred(owner, newOwner);
+        owner = newOwner;
+        newOwner = address(0);
+    }
 }
 
 contract ERC20Basic {
@@ -66,7 +66,6 @@ contract BasicToken is ERC20Basic {
     using SafeMath for uint256;
 
     mapping(address => uint256) balances;
-
     uint256 totalSupply_;
 
     function totalSupply() public view returns (uint256) {
@@ -74,8 +73,8 @@ contract BasicToken is ERC20Basic {
     }
 
     function transfer(address _to, uint256 _value) public returns (bool) {
-        require(_to != address(0));
-        require(_value <= balances[msg.sender]);
+        require(_to != address(0), "Receiver address is zero");
+        require(_value <= balances[msg.sender], "Insufficient balance");
 
         balances[msg.sender] = balances[msg.sender].sub(_value);
         balances[_to] = balances[_to].add(_value);
@@ -86,16 +85,13 @@ contract BasicToken is ERC20Basic {
     function balanceOf(address _owner) public view returns (uint256 balance) {
         return balances[_owner];
     }
-
 }
 
 contract BurnableToken is BasicToken {
-
     event Burn(address indexed burner, uint256 value);
 
     function burn(uint256 _value) public {
-        require(_value <= balances[msg.sender]);
-
+        require(_value <= balances[msg.sender], "Insufficient balance to burn");
         address burner = msg.sender;
         balances[burner] = balances[burner].sub(_value);
         totalSupply_ = totalSupply_.sub(_value);
@@ -111,15 +107,13 @@ contract ERC20 is ERC20Basic {
 }
 
 contract StandardToken is ERC20, BasicToken {
-
     mapping (address => mapping (address => uint256)) internal allowed;
 
     function transferFrom(address _from, address _to, uint256 _value) public returns (bool) {
-        require(_to != address(0));
-        require(_value <= balances[_from]);
-        require(_value <= allowed[_from][msg.sender]);
-       
-        
+        require(_to != address(0), "Receiver address is zero");
+        require(_value <= balances[_from], "Insufficient balance");
+        require(_value <= allowed[_from][msg.sender], "Allowance exceeded");
+
         balances[_from] = balances[_from].sub(_value);
         balances[_to] = balances[_to].add(_value);
         allowed[_from][msg.sender] = allowed[_from][msg.sender].sub(_value);
@@ -153,35 +147,31 @@ contract StandardToken is ERC20, BasicToken {
         emit Approval(msg.sender, _spender, allowed[msg.sender][_spender]);
         return true;
     }
-
 }
 
 contract Pausable is Ownable {
     event Pause();
     event Unpause();
-
     address public distributionContract;
-
     bool distributionContractAdded;
     bool public paused = false;
 
-    function addDistributionContract(address _contract) external {
-        require(_contract != address(0));
-        require(distributionContractAdded == false);
-
+    function addDistributionContract(address _contract) external onlyOwner {
+        require(_contract != address(0), "Distribution contract is zero address");
+        require(!distributionContractAdded, "Distribution contract already added");
         distributionContract = _contract;
         distributionContractAdded = true;
     }
 
     modifier whenNotPaused() {
         if(msg.sender != distributionContract) {
-            require(!paused);
+            require(!paused, "Contract is paused");
         }
         _;
     }
 
     modifier whenPaused() {
-        require(paused);
+        require(paused, "Contract is not paused");
         _;
     }
 
@@ -197,7 +187,6 @@ contract Pausable is Ownable {
 }
 
 contract PausableToken is StandardToken, Pausable {
-
     function transfer(address _to, uint256 _value) public whenNotPaused returns (bool) {
         return super.transfer(_to, _value);
     }
@@ -238,7 +227,7 @@ contract FreezableToken is StandardToken, Ownable {
     }
 
     modifier canTransfer(address _sender) {
-        require(!frozenAccounts[_sender]);
+        require(!frozenAccounts[_sender], "Account is frozen");
         _;
     }
 
@@ -256,8 +245,8 @@ contract TimeLockToken is StandardToken, Ownable {
     event TimeLockFunds(address target, uint releasetime);
 
     function timelockAccount(address target, uint releasetime) public onlyOwner {
-        uint r_time;
-        r_time = now + (releasetime * 1 days);
+        require(releasetime > 0, "Release time must be greater than zero");
+        uint r_time = now + (releasetime * 1 days);
         timelockAccounts[target] = r_time;
         emit TimeLockFunds(target, r_time);
     }
@@ -272,7 +261,7 @@ contract TimeLockToken is StandardToken, Ownable {
     }
 
     modifier ReleaseTimeTransfer(address _sender) {
-        require(now >= timelockAccounts[_sender]);
+        require(now >= timelockAccounts[_sender], "Tokens are time-locked");
         _;
     }
 
@@ -289,7 +278,6 @@ contract CCash is TimeLockToken, FreezableToken, PausableToken, BurnableToken {
     string public constant name = "C-Cash";
     string public constant symbol = "CCASH";
     uint public constant decimals = 18;
-
     uint public constant INITIAL_SUPPLY = 10000000000 * (10 ** decimals);
 
     constructor() public {
